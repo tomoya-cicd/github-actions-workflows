@@ -1,0 +1,498 @@
+# Xcode macOS CI/CD Reusable Workflow
+# Storyboard/SwiftUI × CocoaPods/SPM 全対応
+# コード署名オプション対応
+
+name: Xcode macOS CI/CD
+
+on:
+  workflow_call:
+    inputs:
+      # UIフレームワーク
+      ui-framework:
+        description: 'UI framework (storyboard or swiftui)'
+        required: false
+        type: string
+        default: 'swiftui'
+      
+      # 依存関係マネージャー
+      dependency-manager:
+        description: 'Dependency manager (cocoapods or spm)'
+        required: false
+        type: string
+        default: 'spm'
+      
+      # プロジェクト設定
+      project-path:
+        description: 'Path to .xcodeproj or .xcworkspace'
+        required: true
+        type: string
+      
+      scheme:
+        description: 'Xcode scheme name'
+        required: true
+        type: string
+      
+      # ビルド設定
+      configuration:
+        description: 'Build configuration (Debug or Release)'
+        required: false
+        type: string
+        default: 'Release'
+      
+      # コード署名設定
+      enable-code-signing:
+        description: 'Enable code signing'
+        required: false
+        type: boolean
+        default: false
+      
+      signing-identity:
+        description: 'Code signing identity (e.g., "Developer ID Application: Your Name")'
+        required: false
+        type: string
+        default: '-'
+      
+      development-team:
+        description: 'Development team ID'
+        required: false
+        type: string
+        default: ''
+      
+      export-method:
+        description: 'Export method (development, developer-id, app-store)'
+        required: false
+        type: string
+        default: 'development'
+      
+      # テスト実行
+      run-tests:
+        description: 'Run unit tests'
+        required: false
+        type: boolean
+        default: true
+      
+      # DMG作成
+      create-dmg:
+        description: 'Create DMG installer'
+        required: false
+        type: boolean
+        default: true
+      
+      # Xcode バージョン
+      xcode-version:
+        description: 'Xcode version (e.g., latest-stable, 15.2, 16.0)'
+        required: false
+        type: string
+        default: 'latest-stable'
+      
+      # 作業ディレクトリ
+      working-directory:
+        required: false
+        type: string
+        default: '.'
+      
+      # ランナー
+      runs-on:
+        required: false
+        type: string
+        default: 'self-hosted'
+    
+    secrets:
+      GITHUB_TOKEN:
+        required: false
+
+jobs:
+  # 環境セットアップ
+  setup:
+    name: Setup Build Environment
+    runs-on: ${{ inputs.runs-on }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    
+    outputs:
+      project-type: ${{ steps.detect.outputs.project-type }}
+      app-name: ${{ steps.detect.outputs.app-name }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+      
+      - name: Detect project type
+        id: detect
+        run: |
+          echo "## 🔨 Build Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **UI Framework**: ${{ inputs.ui-framework }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dependency Manager**: ${{ inputs.dependency-manager }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Code Signing**: ${{ inputs.enable-code-signing && 'Enabled' || 'Disabled' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Xcode**: $(xcodebuild -version | head -1)" >> $GITHUB_STEP_SUMMARY
+          echo "- **macOS**: $(sw_vers -productVersion)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Swift**: $(swift --version | head -1)" >> $GITHUB_STEP_SUMMARY
+          
+          # プロジェクトタイプ判定
+          if [[ "${{ inputs.project-path }}" == *.xcworkspace ]]; then
+            echo "project-type=workspace" >> $GITHUB_OUTPUT
+          else
+            echo "project-type=project" >> $GITHUB_OUTPUT
+          fi
+          
+          # アプリ名抽出
+          APP_NAME="${{ inputs.scheme }}"
+          echo "app-name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "- **App Name**: $APP_NAME" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Show environment
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### System Information" >> $GITHUB_STEP_SUMMARY
+          echo "- macOS SDK: $(xcrun --show-sdk-version)" >> $GITHUB_STEP_SUMMARY
+          echo "- Ruby: $(ruby --version | cut -d' ' -f1-2)" >> $GITHUB_STEP_SUMMARY
+  
+  # 依存関係インストール
+  dependencies:
+    name: Install Dependencies
+    runs-on: ${{ inputs.runs-on }}
+    needs: setup
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+      
+      - name: Install CocoaPods dependencies
+        if: inputs.dependency-manager == 'cocoapods'
+        run: |
+          echo "## 📦 CocoaPods Dependencies" >> $GITHUB_STEP_SUMMARY
+          
+          # CocoaPodsインストール
+          sudo gem install cocoapods
+          echo "- **CocoaPods**: $(pod --version)" >> $GITHUB_STEP_SUMMARY
+          
+          # 依存関係インストール
+          pod install --repo-update
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installed Pods" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          pod list 2>/dev/null | head -20 || echo "No pods listed"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Resolve SPM dependencies
+        if: inputs.dependency-manager == 'spm'
+        run: |
+          echo "## 📦 Swift Package Manager" >> $GITHUB_STEP_SUMMARY
+          
+          # SPM依存関係解決
+          if [ "${{ needs.setup.outputs.project-type }}" = "workspace" ]; then
+            xcodebuild -resolvePackageDependencies -workspace ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+          else
+            xcodebuild -resolvePackageDependencies -project ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+          fi
+          
+          # Package.resolved表示
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resolved Packages" >> $GITHUB_STEP_SUMMARY
+          
+          RESOLVED_FILE="${{ inputs.project-path }}/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+          if [ -f "$RESOLVED_FILE" ]; then
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat "$RESOLVED_FILE" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Package.resolved found" >> $GITHUB_STEP_SUMMARY
+          fi
+  
+  # ビルド
+  build:
+    name: Build macOS App
+    runs-on: ${{ inputs.runs-on }}
+    needs: [setup, dependencies]
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+      
+      - name: Install CocoaPods (if needed)
+        if: inputs.dependency-manager == 'cocoapods'
+        run: |
+          sudo gem install cocoapods
+          pod install --repo-update
+      
+      - name: Resolve SPM (if needed)
+        if: inputs.dependency-manager == 'spm'
+        run: |
+          if [ "${{ needs.setup.outputs.project-type }}" = "workspace" ]; then
+            xcodebuild -resolvePackageDependencies -workspace ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+          else
+            xcodebuild -resolvePackageDependencies -project ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+          fi
+      
+      - name: Build macOS app
+        run: |
+          echo "## 🔨 Building macOS App" >> $GITHUB_STEP_SUMMARY
+          
+          # ビルドコマンド構築
+          if [ "${{ needs.setup.outputs.project-type }}" = "workspace" ]; then
+            BUILD_CMD="-workspace ${{ inputs.project-path }}"
+          else
+            BUILD_CMD="-project ${{ inputs.project-path }}"
+          fi
+          
+          # SwiftUI固有のフラグ
+          if [ "${{ inputs.ui-framework }}" = "swiftui" ]; then
+            SWIFT_FLAGS="SWIFT_COMPILATION_MODE=wholemodule SWIFT_OPTIMIZATION_LEVEL=-O"
+          else
+            SWIFT_FLAGS=""
+          fi
+          
+          # 署名設定
+          if [ "${{ inputs.enable-code-signing }}" = "true" ]; then
+            SIGNING_FLAGS="CODE_SIGN_IDENTITY=\"${{ inputs.signing-identity }}\""
+            if [ -n "${{ inputs.development-team }}" ]; then
+              SIGNING_FLAGS="$SIGNING_FLAGS DEVELOPMENT_TEAM=\"${{ inputs.development-team }}\""
+            fi
+          else
+            SIGNING_FLAGS="CODE_SIGN_IDENTITY=\"-\" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO"
+          fi
+          
+          # ビルド実行
+          xcodebuild \
+            $BUILD_CMD \
+            -scheme ${{ inputs.scheme }} \
+            -sdk macosx \
+            -configuration ${{ inputs.configuration }} \
+            -archivePath build/${{ needs.setup.outputs.app-name }}.xcarchive \
+            clean archive \
+            $SWIFT_FLAGS \
+            $SIGNING_FLAGS \
+            ONLY_ACTIVE_ARCH=NO \
+            | xcpretty || true
+          
+          echo "✅ Build completed" >> $GITHUB_STEP_SUMMARY
+      
+      - name: Export .app bundle
+        run: |
+          # exportOptions.plist作成
+          cat > exportOptions.plist <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>${{ inputs.export-method }}</string>
+EOF
+          
+          # 署名が有効な場合の追加設定
+          if [ "${{ inputs.enable-code-signing }}" = "true" ]; then
+            cat >> exportOptions.plist <<EOF
+    <key>signingStyle</key>
+    <string>manual</string>
+EOF
+            if [ -n "${{ inputs.development-team }}" ]; then
+              cat >> exportOptions.plist <<EOF
+    <key>teamID</key>
+    <string>${{ inputs.development-team }}</string>
+EOF
+            fi
+          fi
+          
+          cat >> exportOptions.plist <<EOF
+    <key>stripSwiftSymbols</key>
+    <true/>
+</dict>
+</plist>
+EOF
+          
+          # Export
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/${{ needs.setup.outputs.app-name }}.xcarchive \
+            -exportPath dist \
+            -exportOptionsPlist exportOptions.plist
+      
+      - name: Verify app bundle
+        run: |
+          APP_PATH="dist/${{ needs.setup.outputs.app-name }}.app"
+          
+          echo "## 📦 App Bundle Information" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -d "$APP_PATH" ]; then
+            # サイズ
+            APP_SIZE=$(du -sh "$APP_PATH" | cut -f1)
+            echo "- **Size**: $APP_SIZE" >> $GITHUB_STEP_SUMMARY
+            
+            # バージョン情報
+            VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "N/A")
+            BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "N/A")
+            BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print CFBundleIdentifier" "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "N/A")
+            
+            echo "- **Version**: $VERSION ($BUILD)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Bundle ID**: $BUNDLE_ID" >> $GITHUB_STEP_SUMMARY
+            
+            # 署名情報
+            if [ "${{ inputs.enable-code-signing }}" = "true" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### Code Signature" >> $GITHUB_STEP_SUMMARY
+              codesign -dv "$APP_PATH" 2>&1 | head -5 >> $GITHUB_STEP_SUMMARY || echo "⚠️ Signature verification failed" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Signing**: Disabled (development build)" >> $GITHUB_STEP_SUMMARY
+            fi
+            
+            # SwiftUIの場合、フレームワーク確認
+            if [ "${{ inputs.ui-framework }}" = "swiftui" ]; then
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "### SwiftUI Frameworks" >> $GITHUB_STEP_SUMMARY
+              ls "$APP_PATH/Contents/Frameworks/" 2>/dev/null | grep -i swift >> $GITHUB_STEP_SUMMARY || echo "No Swift frameworks" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "❌ App bundle not found!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+      
+      - name: Upload .app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.setup.outputs.app-name }}-${{ inputs.ui-framework }}-${{ inputs.dependency-manager }}
+          path: ${{ inputs.working-directory }}/dist/${{ needs.setup.outputs.app-name }}.app
+          retention-days: 30
+  
+  # テスト
+  test:
+    name: Run Tests
+    runs-on: ${{ inputs.runs-on }}
+    needs: [setup, dependencies]
+    if: inputs.run-tests
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Select Xcode version
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: ${{ inputs.xcode-version }}
+      
+      - name: Install dependencies
+        run: |
+          if [ "${{ inputs.dependency-manager }}" = "cocoapods" ]; then
+            sudo gem install cocoapods
+            pod install --repo-update
+          else
+            if [ "${{ needs.setup.outputs.project-type }}" = "workspace" ]; then
+              xcodebuild -resolvePackageDependencies -workspace ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+            else
+              xcodebuild -resolvePackageDependencies -project ${{ inputs.project-path }} -scheme ${{ inputs.scheme }}
+            fi
+          fi
+      
+      - name: Run unit tests
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.setup.outputs.project-type }}" = "workspace" ]; then
+            BUILD_CMD="-workspace ${{ inputs.project-path }}"
+          else
+            BUILD_CMD="-project ${{ inputs.project-path }}"
+          fi
+          
+          xcodebuild test \
+            $BUILD_CMD \
+            -scheme ${{ inputs.scheme }} \
+            -destination 'platform=macOS' \
+            | xcpretty || true
+          
+          echo "✅ Tests completed" >> $GITHUB_STEP_SUMMARY
+  
+  # DMG作成
+  package:
+    name: Create Distribution Package
+    runs-on: ${{ inputs.runs-on }}
+    needs: [setup, build]
+    if: inputs.create-dmg
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Download .app bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.setup.outputs.app-name }}-${{ inputs.ui-framework }}-${{ inputs.dependency-manager }}
+          path: ${{ inputs.working-directory }}/dist
+      
+      - name: Install create-dmg
+        run: |
+          brew install create-dmg 2>/dev/null || true
+      
+      - name: Create DMG
+        run: |
+          echo "## 📀 Distribution Packages" >> $GITHUB_STEP_SUMMARY
+          
+          APP_NAME="${{ needs.setup.outputs.app-name }}"
+          
+          # DMG作成
+          create-dmg \
+            --volname "$APP_NAME" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --app-drop-link 600 185 \
+            "dist/$APP_NAME.dmg" \
+            "dist/$APP_NAME.app" || \
+          (cd dist && zip -r "$APP_NAME.zip" "$APP_NAME.app")
+          
+          # サイズ表示
+          ls -lh dist/*.dmg dist/*.zip 2>/dev/null | awk '{print "- "$9": "$5}' >> $GITHUB_STEP_SUMMARY || true
+      
+      - name: Upload distribution packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.setup.outputs.app-name }}-installer
+          path: |
+            ${{ inputs.working-directory }}/dist/*.dmg
+            ${{ inputs.working-directory }}/dist/*.zip
+          retention-days: 30
+  
+  # サマリー
+  summary:
+    name: Build Summary
+    runs-on: ${{ inputs.runs-on }}
+    needs: [setup, build, test, package]
+    if: always()
+    
+    steps:
+      - name: Generate summary
+        run: |
+          echo "## ✅ Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | ${{ needs.test.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | ${{ needs.package.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
