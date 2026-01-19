@@ -1,0 +1,75 @@
+# Container CI/CD ワークフローの使用例
+# Docker/Podman コンテナイメージのビルドとプッシュ
+
+name: Container CI/CD Example
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'  # v1.0.0 などのタグでリリース
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/container-cicd.yml@main
+    
+    with:
+      # コンテナランタイム（docker, podman）
+      # 自動検出されますが、明示的に指定も可能
+      container-runtime: 'docker'
+      
+      # イメージ名
+      image-name: 'myapp'
+      
+      # レジストリ（docker.io, ghcr.io, gcr.io, ecr）
+      registry: 'ghcr.io'
+      
+      # マルチプラットフォームビルド
+      platforms: 'linux/amd64,linux/arm64'
+      
+      # Dockerfileのパス
+      dockerfile-path: './Dockerfile'
+      
+      # ビルドコンテキスト
+      build-context: '.'
+      
+      # ビルド引数
+      build-args: |
+        NODE_ENV=production
+        APP_VERSION=${{ github.ref_name }}
+      
+      # タグ戦略
+      # - latest: 常に latest タグを付与
+      # - semver: セマンティックバージョニング（v1.2.3 -> 1.2.3, 1.2, 1）
+      # - sha: Git SHA
+      # - branch: ブランチ名
+      tag-strategy: 'semver,latest,sha'
+      
+      # セキュリティスキャン
+      run-security-scan: true      # Trivy でスキャン
+      scan-severity: 'CRITICAL,HIGH'  # 検出する脆弱性レベル
+      
+      # イメージの最適化
+      optimize-image: true         # イメージサイズ最適化
+      
+      # レジストリにプッシュ
+      push-image: true
+      
+      runs-on: 'self-hosted'
+    
+    secrets:
+      # Docker Hub
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      
+      # GitHub Container Registry（推奨）
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      # Google Container Registry
+      # GCR_SERVICE_ACCOUNT_KEY: ${{ secrets.GCR_SERVICE_ACCOUNT_KEY }}
+      
+      # AWS ECR
+      # AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      # AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
