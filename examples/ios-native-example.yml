@@ -1,0 +1,321 @@
+# iOS Native CI/CD ワークフローの使用例
+# Swift/SwiftUI、UIKit を使ったネイティブiOSアプリ向け
+# Xcodeプロジェクト（.xcodeproj）または Xcodeワークスペース（.xcworkspace）に対応
+
+name: iOS Native CI/CD Example
+
+on:
+  push:
+    branches: [main, develop]
+    tags:
+      - 'v*'  # バージョンタグ（v1.0.0など）
+  
+  pull_request:
+    branches: [main]
+  
+  # 手動実行
+  workflow_dispatch:
+    inputs:
+      deploy_testflight:
+        description: 'TestFlightにデプロイするか'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  # ビルドとテスト
+  build-and-test:
+    name: Build and Test iOS App
+    # Mac環境が必須（Xcodeを使用するため）
+    runs-on: macos-14  # または self-hosted（Mac Studio使用時）
+    
+    env:
+      # Xcodeプロジェクト設定
+      XCODE_PROJECT: 'MyApp.xcodeproj'        # .xcodeprojファイル名
+      # または XCODE_WORKSPACE: 'MyApp.xcworkspace'  # CocoaPods使用時
+      
+      SCHEME: 'MyApp'                          # ビルドスキーム
+      CONFIGURATION: 'Release'                 # ビルド構成（Debug/Release）
+      
+      # ターゲット設定
+      IOS_DEPLOYMENT_TARGET: '15.0'           # 最小iOSバージョン
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      # Xcodeバージョンの選択
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+      
+      - name: Show Xcode version
+        run: xcodebuild -version
+      
+      # 依存関係のインストール
+      - name: Install dependencies
+        run: |
+          # CocoaPods使用時
+          if [ -f "Podfile" ]; then
+            sudo gem install cocoapods
+            pod install
+          fi
+          
+          # Carthage使用時
+          if [ -f "Cartfile" ]; then
+            brew install carthage
+            carthage bootstrap --platform iOS --use-xcframeworks
+          fi
+          
+          # Swift Package Manager（SPM）は自動解決
+      
+      # キャッシュ（ビルド時間短縮）
+      - name: Cache CocoaPods
+        if: hashFiles('Podfile.lock') != ''
+        uses: actions/cache@v4
+        with:
+          path: Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+      
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-derived-data-${{ hashFiles('**/*.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-derived-data-
+      
+      # SwiftLint（コード品質チェック）
+      - name: Run SwiftLint
+        run: |
+          if [ -f ".swiftlint.yml" ]; then
+            brew install swiftlint
+            swiftlint lint --reporter github-actions-logging
+          fi
+      
+      # ユニットテストの実行
+      - name: Run unit tests
+        run: |
+          # .xcworkspace使用時
+          if [ -f "${XCODE_PROJECT%.xcodeproj}.xcworkspace" ]; then
+            xcodebuild test \
+              -workspace "${XCODE_PROJECT%.xcodeproj}.xcworkspace" \
+              -scheme "$SCHEME" \
+              -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
+              -configuration Debug \
+              -enableCodeCoverage YES \
+              | xcpretty
+          else
+            # .xcodeproj使用時
+            xcodebuild test \
+              -project "$XCODE_PROJECT" \
+              -scheme "$SCHEME" \
+              -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
+              -configuration Debug \
+              -enableCodeCoverage YES \
+              | xcpretty
+          fi
+      
+      # コードカバレッジレポート
+      - name: Generate code coverage report
+        run: |
+          xcrun llvm-cov export \
+            -format="lcov" \
+            -instr-profile=$(find ~/Library/Developer/Xcode/DerivedData -name "*.profdata") \
+            $(find ~/Library/Developer/Xcode/DerivedData -name "*.app" | head -1)/Contents/MacOS/* \
+            > coverage.lcov
+      
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.lcov
+          flags: ios
+      
+      # リリースビルド
+      - name: Build for release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        run: |
+          if [ -f "${XCODE_PROJECT%.xcodeproj}.xcworkspace" ]; then
+            xcodebuild build \
+              -workspace "${XCODE_PROJECT%.xcodeproj}.xcworkspace" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              | xcpretty
+          else
+            xcodebuild build \
+              -project "$XCODE_PROJECT" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -destination 'generic/platform=iOS' \
+              CODE_SIGN_IDENTITY="" \
+              CODE_SIGNING_REQUIRED=NO \
+              | xcpretty
+          fi
+  
+  # App Store Connect / TestFlightへのデプロイ
+  deploy-testflight:
+    name: Deploy to TestFlight
+    needs: build-and-test
+    # mainブランチへのpush、またはタグ付けされた時のみ実行
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.deploy_testflight)
+    
+    runs-on: macos-14
+    
+    env:
+      XCODE_PROJECT: 'MyApp.xcodeproj'
+      SCHEME: 'MyApp'
+      CONFIGURATION: 'Release'
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+      
+      # 証明書とプロビジョニングプロファイルのインストール
+      - name: Install Apple Certificate and Provisioning Profile
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          # 証明書とプロファイルの一時ファイル作成
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          
+          # Base64デコード
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
+          
+          # キーチェーン作成
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          
+          # 証明書をキーチェーンにインポート
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          
+          # プロビジョニングプロファイルをインストール
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+      
+      # 依存関係のインストール
+      - name: Install dependencies
+        run: |
+          if [ -f "Podfile" ]; then
+            sudo gem install cocoapods
+            pod install
+          fi
+      
+      # バージョン番号とビルド番号の設定
+      - name: Set version and build number
+        run: |
+          # タグからバージョン番号を取得（v1.2.3 -> 1.2.3）
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="1.0.0"
+          fi
+          
+          # ビルド番号（GitHub Run Number使用）
+          BUILD_NUMBER=$GITHUB_RUN_NUMBER
+          
+          # Info.plistを更新
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$SCHEME/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$SCHEME/Info.plist"
+          
+          echo "Version: $VERSION"
+          echo "Build: $BUILD_NUMBER"
+      
+      # アーカイブ（.ipaファイル作成）
+      - name: Build and archive
+        run: |
+          if [ -f "${XCODE_PROJECT%.xcodeproj}.xcworkspace" ]; then
+            xcodebuild archive \
+              -workspace "${XCODE_PROJECT%.xcodeproj}.xcworkspace" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -archivePath $RUNNER_TEMP/MyApp.xcarchive \
+              | xcpretty
+          else
+            xcodebuild archive \
+              -project "$XCODE_PROJECT" \
+              -scheme "$SCHEME" \
+              -configuration "$CONFIGURATION" \
+              -archivePath $RUNNER_TEMP/MyApp.xcarchive \
+              | xcpretty
+          fi
+      
+      # Export（.ipaファイル生成）
+      - name: Export IPA
+        run: |
+          # ExportOptions.plist作成
+          cat > $RUNNER_TEMP/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>teamID</key>
+              <string>YOUR_TEAM_ID</string>
+              <key>uploadBitcode</key>
+              <false/>
+              <key>compileBitcode</key>
+              <false/>
+              <key>uploadSymbols</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+          
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/MyApp.xcarchive \
+            -exportPath $RUNNER_TEMP/export \
+            -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist \
+            | xcpretty
+      
+      # App Store Connectへアップロード（TestFlight）
+      - name: Upload to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+        run: |
+          # API Keyファイル作成
+          API_KEY_PATH=$RUNNER_TEMP/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
+          echo -n "$APP_STORE_CONNECT_API_KEY_BASE64" | base64 --decode -o $API_KEY_PATH
+          
+          # xcrunでアップロード
+          xcrun altool --upload-app \
+            -f $RUNNER_TEMP/export/*.ipa \
+            -t ios \
+            --apiKey $APP_STORE_CONNECT_API_KEY_ID \
+            --apiIssuer $APP_STORE_CONNECT_ISSUER_ID
+      
+      # クリーンアップ
+      - name: Clean up keychain and provisioning profile
+        if: always()
+        run: |
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+          rm ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision || true
+      
+      # 成果物のアップロード
+      - name: Upload IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 30
