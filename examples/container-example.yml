@@ -13,7 +13,7 @@ on:
 
 jobs:
   build-and-push:
-    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/container-cicd.yml@main
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/container-cicd.yml@main
     
     with:
       # コンテナランタイム（docker, podman）
