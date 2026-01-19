@@ -1,0 +1,43 @@
+# C++ CI/CD Example
+# モダンC++（C++11/14/17/20/23）プロジェクト向け
+
+name: C++ CI/CD Example
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/c-cpp-cicd.yml@main
+    
+    with:
+      # 言語設定
+      language: 'cpp'
+      cpp-standard: 'c++17'  # c++11, c++14, c++17, c++20, c++23
+      
+      # コンパイラ
+      compiler: 'clang'  # または 'g++', 'auto'
+      
+      # ビルドシステム
+      build-system: 'cmake'
+      cmake-options: '-DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON'
+      
+      # テスト
+      run-tests: true
+      test-command: 'ctest'
+      
+      # 静的解析
+      run-static-analysis: true
+      run-valgrind: false  # C++ではオプショナル
+      
+      # 最適化
+      optimization-level: 'O3'  # C++は積極的に最適化
+      
+      # ドキュメント（Doxygen）
+      generate-docs: true
+      
+      # ランナー
+      runs-on: 'self-hosted'  # Mac Studio
