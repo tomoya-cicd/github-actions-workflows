@@ -11,7 +11,7 @@ on:
 
 jobs:
   test-and-deploy:
-    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/python-cicd.yml@main
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/python-cicd.yml@main
     
     with:
       # Pythonバージョン（複数指定可能、カンマ区切り）
