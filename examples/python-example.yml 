@@ -1,0 +1,57 @@
+# Python CI/CD ワークフローの使用例
+# Django、FastAPI、Flask などのPythonプロジェクトに対応
+
+name: Python CI/CD Example
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-deploy:
+    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/python-cicd.yml@main
+    
+    with:
+      # Pythonバージョン（複数指定可能、カンマ区切り）
+      python-version: '3.11,3.12'  # 複数バージョンでテスト
+      
+      # プロジェクトタイプ（django, fastapi, flask, general）
+      project-type: 'django'
+      
+      # 依存関係管理ツール（pip, poetry, pipenv）
+      package-manager: 'poetry'
+      
+      # テスト設定
+      run-tests: true              # pytest実行
+      run-linting: true            # ruff, black, mypyなどを実行
+      test-coverage: true          # カバレッジレポート生成
+      coverage-threshold: 80       # 最低カバレッジ（%）
+      
+      # セキュリティチェック
+      run-security-scan: true      # bandit, safety でセキュリティスキャン
+      
+      # ドキュメント生成
+      build-docs: true             # Sphinx ドキュメント生成
+      
+      # デプロイ設定
+      deploy: true                 # デプロイを実行
+      deploy-target: 'cloudflare-workers'  # cloudflare-workers, vercel, railway, render
+      
+      # 環境
+      environment: 'production'
+      
+      runs-on: 'ubuntu-latest'
+    
+    secrets:
+      # Cloudflare Workers デプロイ用
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      
+      # データベース接続（テスト用）
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      
+      # その他の環境変数
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      ALLOWED_HOSTS: ${{ secrets.ALLOWED_HOSTS }}
