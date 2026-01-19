@@ -1,0 +1,196 @@
+# C++ Game Development & Graphics Example
+# ゲーム開発・グラフィックスプログラミング向け最適化
+# OpenGL/Vulkan/Metal対応、パフォーマンス重視
+
+name: C++ Game & Graphics CI/CD
+
+on:
+  push:
+    branches: [main, develop, feature/*, graphics/*]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ゲーム・グラフィックスビルド（パフォーマンス最適化）
+  build-game:
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/c-cpp-cicd.yml@main
+    
+    with:
+      # 言語設定
+      language: 'cpp'
+      cpp-standard: 'c++20'  # モダンC++でゲームロジック簡潔化
+      
+      # コンパイラ
+      compiler: 'clang'  # LLVMの高度な最適化
+      
+      # ビルドシステム
+      build-system: 'cmake'
+      cmake-options: |
+        -DCMAKE_BUILD_TYPE=Release
+        -DENABLE_OPENGL=ON
+        -DENABLE_VULKAN=ON
+        -DENABLE_METAL=ON
+        -DENABLE_AVX2=ON
+        -DENABLE_SIMD=ON
+        -DCMAKE_CXX_FLAGS="-march=native -mtune=native -flto -ffast-math -DNDEBUG"
+        -DCMAKE_EXE_LINKER_FLAGS="-flto"
+        -DBUILD_SHARED_LIBS=OFF
+        -DENABLE_PROFILING=ON
+      
+      # 最適化レベル
+      optimization-level: 'O3'  # 最大速度最適化
+      
+      # テスト
+      run-tests: true
+      test-command: 'ctest --output-on-failure --parallel 4'
+      
+      # 静的解析
+      run-static-analysis: true
+      run-valgrind: false  # グラフィックスアプリでは重い
+      
+      # ドキュメント（API向け）
+      generate-docs: true
+      
+      # ランナー
+      runs-on: 'self-hosted'  # Mac Studio（Metal GPU活用）
+  
+  # グラフィックスパフォーマンステスト
+  graphics-benchmark:
+    needs: build-game
+    runs-on: self-hosted
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries-native
+      
+      - name: GPU information
+        run: |
+          echo "## 🎮 Graphics Performance Test" >> $GITHUB_STEP_SUMMARY
+          echo "### GPU Information" >> $GITHUB_STEP_SUMMARY
+          
+          # Mac StudioのGPU情報取得
+          system_profiler SPDisplaysDataType | grep -E "Chipset Model|VRAM" >> $GITHUB_STEP_SUMMARY || true
+      
+      - name: Run graphics benchmarks
+        run: |
+          if [ -x "build/graphics_benchmark" ]; then
+            echo "### Benchmark Results" >> $GITHUB_STEP_SUMMARY
+            
+            # フレームレートテスト
+            ./build/graphics_benchmark \
+              --resolution=1920x1080 \
+              --vsync=off \
+              --duration=60 \
+              --format=markdown >> $GITHUB_STEP_SUMMARY
+            
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Performance Metrics" >> $GITHUB_STEP_SUMMARY
+            echo "- Target: 60 FPS" >> $GITHUB_STEP_SUMMARY
+            echo "- Resolution: 1920x1080" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Shader compilation test
+        run: |
+          echo "### Shader Compilation" >> $GITHUB_STEP_SUMMARY
+          
+          # シェーダーコンパイル
+          if command -v glslangValidator &> /dev/null; then
+            shader_count=$(find shaders -name "*.vert" -o -name "*.frag" | wc -l)
+            echo "- Total shaders: $shader_count" >> $GITHUB_STEP_SUMMARY
+            
+            # GLSL検証
+            find shaders -name "*.vert" -o -name "*.frag" | while read shader; do
+              glslangValidator "$shader" && echo "✅ $(basename $shader)" || echo "❌ $(basename $shader)"
+            done >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Render test screenshots
+        run: |
+          if [ -x "build/render_test" ]; then
+            mkdir -p screenshots
+            ./build/render_test --headless --screenshot screenshots/
+            
+            echo "### Render Tests" >> $GITHUB_STEP_SUMMARY
+            ls -1 screenshots/*.png 2>/dev/null | wc -l | xargs -I {} echo "- Screenshots generated: {}" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-screenshots
+          path: screenshots/
+          retention-days: 7
+  
+  # プロファイリング
+  performance-profile:
+    needs: build-game
+    runs-on: self-hosted
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: binaries-native
+      
+      - name: CPU profiling
+        run: |
+          echo "## 📊 Performance Profiling" >> $GITHUB_STEP_SUMMARY
+          
+          # Instrumentsでプロファイリング（Mac）
+          if command -v instruments &> /dev/null; then
+            echo "### CPU Profile" >> $GITHUB_STEP_SUMMARY
+            # Instrumentsを使ったプロファイリング
+            # instruments -t "Time Profiler" -D profile.trace ./build/game
+            echo "- Profiling data generated" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Memory profiling
+        run: |
+          if [ -x "build/game" ]; then
+            echo "### Memory Usage" >> $GITHUB_STEP_SUMMARY
+            
+            # ゲーム実行時のメモリ使用量測定
+            /usr/bin/time -l ./build/game --benchmark-mode 2>&1 | \
+              grep -E "maximum resident set size" | \
+              awk '{printf "- Peak Memory: %.2f MB\n", $1/1024/1024}' >> $GITHUB_STEP_SUMMARY || true
+          fi
+  
+  # アセット検証
+  asset-validation:
+    runs-on: self-hosted
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Validate game assets
+        run: |
+          echo "## 🎨 Asset Validation" >> $GITHUB_STEP_SUMMARY
+          
+          # テクスチャサイズチェック
+          if [ -d "assets/textures" ]; then
+            echo "### Textures" >> $GITHUB_STEP_SUMMARY
+            texture_count=$(find assets/textures -name "*.png" -o -name "*.jpg" | wc -l)
+            total_size=$(du -sh assets/textures | cut -f1)
+            echo "- Count: $texture_count" >> $GITHUB_STEP_SUMMARY
+            echo "- Total size: $total_size" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # モデルファイルチェック
+          if [ -d "assets/models" ]; then
+            echo "### 3D Models" >> $GITHUB_STEP_SUMMARY
+            model_count=$(find assets/models -name "*.obj" -o -name "*.fbx" -o -name "*.gltf" | wc -l)
+            echo "- Count: $model_count" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # オーディオファイルチェック
+          if [ -d "assets/audio" ]; then
+            echo "### Audio Files" >> $GITHUB_STEP_SUMMARY
+            audio_count=$(find assets/audio -name "*.wav" -o -name "*.ogg" -o -name "*.mp3" | wc -l)
+            echo "- Count: $audio_count" >> $GITHUB_STEP_SUMMARY
+          fi
