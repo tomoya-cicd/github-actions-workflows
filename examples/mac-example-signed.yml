@@ -1,0 +1,54 @@
+# Xcode macOS Example - Signed Build
+# リリース用・コード署名付きビルド
+
+name: macOS App Signed Build
+
+on:
+  push:
+    branches: [release/*, main]
+  release:
+    types: [published]
+
+jobs:
+  # SwiftUI + SPM（署名あり）
+  swiftui-spm-signed:
+    name: SwiftUI + SPM (Signed)
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/xcode-macos-cicd.yml
+    with:
+      ui-framework: 'swiftui'
+      dependency-manager: 'spm'
+      project-path: 'MySwiftUIApp.xcodeproj'
+      scheme: 'MySwiftUIApp'
+      configuration: 'Release'
+      
+      # 署名設定
+      enable-code-signing: true
+      signing-identity: 'Developer ID Application: Your Name (TEAM_ID)'
+      development-team: 'YOUR_TEAM_ID'
+      export-method: 'developer-id'
+      
+      run-tests: true
+      create-dmg: true
+      xcode-version: 'latest-stable'
+      runs-on: 'self-hosted'
+  
+  # Storyboard + CocoaPods（署名あり）
+  storyboard-cocoapods-signed:
+    name: Storyboard + CocoaPods (Signed)
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/xcode-macos-cicd.yml
+    with:
+      ui-framework: 'storyboard'
+      dependency-manager: 'cocoapods'
+      project-path: 'MyApp.xcworkspace'
+      scheme: 'MyApp'
+      configuration: 'Release'
+      
+      # 署名設定
+      enable-code-signing: true
+      signing-identity: 'Developer ID Application: Your Name (TEAM_ID)'
+      development-team: 'YOUR_TEAM_ID'
+      export-method: 'developer-id'
+      
+      run-tests: true
+      create-dmg: true
+      runs-on: 'self-hosted'
