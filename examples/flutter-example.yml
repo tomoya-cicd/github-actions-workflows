@@ -30,7 +30,7 @@ jobs:
     
     with:
       # Flutterのバージョン指定（省略時は最新安定版）
-      flutter-version: '3.27.1'
+      flutter-version: '3.38.7'
       
       # ビルドターゲットの設定
       build-ios: true          # iOSアプリをビルド
