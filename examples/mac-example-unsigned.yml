@@ -1,0 +1,41 @@
+# Xcode macOS Example - Unsigned Build
+# 開発用・署名なしビルド
+
+name: macOS App Unsigned Build
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  # SwiftUI + SPM（署名なし）
+  swiftui-spm-unsigned:
+    name: SwiftUI + SPM (Unsigned)
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/xcode-macos-cicd.yml
+    with:
+      ui-framework: 'swiftui'
+      dependency-manager: 'spm'
+      project-path: 'MySwiftUIApp.xcodeproj'
+      scheme: 'MySwiftUIApp'
+      configuration: 'Release'
+      enable-code-signing: false  # 署名なし
+      run-tests: true
+      create-dmg: true
+      xcode-version: 'latest-stable'
+      runs-on: 'self-hosted'
+  
+  # Storyboard + CocoaPods（署名なし）
+  storyboard-cocoapods-unsigned:
+    name: Storyboard + CocoaPods (Unsigned)
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/xcode-macos-cicd.yml
+    with:
+      ui-framework: 'storyboard'
+      dependency-manager: 'cocoapods'
+      project-path: 'MyApp.xcworkspace'
+      scheme: 'MyApp'
+      configuration: 'Release'
+      enable-code-signing: false  # 署名なし
+      run-tests: true
+      create-dmg: true
+      runs-on: 'self-hosted'
