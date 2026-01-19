@@ -1,0 +1,81 @@
+# Web CI/CD ワークフローの使用例
+# React、Vue、Next.js、Nuxt、Svelte、Astro などに対応
+
+name: Web CI/CD Example
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-deploy:
+    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/web-cicd.yml@main
+    
+    with:
+      # プロジェクトタイプ（react, vue, nextjs, nuxt, svelte, astro, vite）
+      project-type: 'nextjs'
+      
+      # Node.jsバージョン
+      node-version: '20'
+      
+      # パッケージマネージャー（npm, yarn, pnpm, bun）
+      package-manager: 'pnpm'
+      
+      # ビルドコマンド（デフォルトはプロジェクトタイプから自動検出）
+      build-command: 'pnpm run build'
+      
+      # ビルド成果物のディレクトリ
+      build-output-dir: '.next'  # Next.jsの場合
+      # build-output-dir: 'dist'   # Vite, Astroなどの場合
+      # build-output-dir: '.output' # Nuxtの場合
+      
+      # テスト設定
+      run-tests: true              # ユニットテスト実行
+      run-e2e-tests: true          # E2Eテスト（Playwright）実行
+      run-linting: true            # ESLint, Prettier実行
+      
+      # 型チェック
+      run-type-check: true         # TypeScript型チェック
+      
+      # Lighthouse CI
+      run-lighthouse: true         # パフォーマンス測定
+      lighthouse-urls: 'https://myapp.example.com'
+      
+      # デプロイ設定
+      deploy: true
+      deploy-target: 'vercel'      # cloudflare-pages, vercel, netlify, firebase, github-pages
+      
+      # 環境変数の設定
+      env-vars: |
+        NEXT_PUBLIC_API_URL=https://api.example.com
+        NEXT_PUBLIC_SITE_URL=https://myapp.example.com
+      
+      # プレビューデプロイ（PRごと）
+      deploy-preview: true
+      
+      environment: 'production'
+      
+      runs-on: 'ubuntu-latest'
+    
+    secrets:
+      # Vercel デプロイ用
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      
+      # Cloudflare Pages デプロイ用
+      # CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      # CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      
+      # Netlify デプロイ用
+      # NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      # NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+      
+      # Firebase デプロイ用
+      # FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      
+      # 環境変数（ビルド時に使用）
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      API_KEY: ${{ secrets.API_KEY }}
