@@ -12,7 +12,7 @@ on:
 jobs:
   # Webフロントエンドのビルド
   web-app:
-    uses: CI-CD-only-Organization/github-actions-workflows/.github/workflows/web-cicd.yml@main
+    uses: tomoya-cicd/github-actions-workflows/.github/workflows/web-cicd.yml@main
     with:
       project-type: 'nextjs'
       package-manager: 'pnpm'
